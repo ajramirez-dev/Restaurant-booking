@@ -192,6 +192,38 @@ class PolymarketClient:
         return Decimal(str(data.get("mid", "0")))
 
     @_RETRY
+    async def get_spread(self, token_id: str) -> Decimal:
+        """
+        Fetch the bid-ask spread for a token directly from the CLOB API.
+
+        Args:
+            token_id: The CLOB token ID.
+
+        Returns:
+            Spread as Decimal (ask - bid).
+        """
+        resp = await self._clob.get("/spread", params={"token_id": token_id})
+        resp.raise_for_status()
+        data = resp.json()
+        return Decimal(str(data.get("spread", "0")))
+
+    @_RETRY
+    async def get_last_trade_price(self, token_id: str) -> Decimal:
+        """
+        Fetch the most recent fill price for a token.
+
+        Args:
+            token_id: The CLOB token ID.
+
+        Returns:
+            Last trade price as Decimal.
+        """
+        resp = await self._clob.get("/last-trade-price", params={"token_id": token_id})
+        resp.raise_for_status()
+        data = resp.json()
+        return Decimal(str(data.get("price", "0")))
+
+    @_RETRY
     async def get_clob_markets(self, next_cursor: str = "") -> dict:
         """
         Fetch the raw CLOB market list (paginated via cursor).
@@ -216,29 +248,50 @@ class PolymarketClient:
 
     @staticmethod
     def _parse_gamma_market(data: dict) -> Market:
+        """
+        Parse a market dict from the Gamma API.
+
+        Gamma API field names (camelCase / actual API shape):
+          conditionId      → condition ID
+          clobTokenIds     → ["<yes_token_id>", "<no_token_id>"]
+          outcomes         → ["YES", "NO"]
+          outcomePrices    → ["0.67", "0.33"]
+          active / closed  → status flags
+          endDate          → ISO 8601 end date
+          volume24hr / volume / liquidity → numeric strings
+        """
+        token_ids: list[str] = data.get("clobTokenIds", data.get("clob_token_ids", []))
+        outcomes: list[str] = data.get("outcomes", ["YES", "NO"])
+        prices: list[str] = data.get("outcomePrices", data.get("outcome_prices", []))
+
         tokens: list[Token] = []
-        for t in data.get("tokens", []):
+        for i, token_id in enumerate(token_ids):
             tokens.append(
                 Token(
-                    token_id=t.get("token_id", ""),
-                    outcome=t.get("outcome", ""),
-                    price=Decimal(str(t.get("price", "0"))),
-                    winner=t.get("winner", False),
+                    token_id=token_id,
+                    outcome=outcomes[i] if i < len(outcomes) else str(i),
+                    price=Decimal(str(prices[i])) if i < len(prices) else Decimal("0"),
+                    winner=False,
                 )
             )
 
         end_date: Optional[datetime] = None
-        if raw_end := data.get("end_date_iso"):
-            try:
-                end_date = datetime.fromisoformat(raw_end.replace("Z", "+00:00"))
-            except ValueError:
-                pass
+        for date_field in ("endDate", "end_date_iso", "end_date"):
+            if raw_end := data.get(date_field):
+                try:
+                    end_date = datetime.fromisoformat(str(raw_end).replace("Z", "+00:00"))
+                    break
+                except ValueError:
+                    continue
 
-        raw_status = data.get("active", True)
-        status = MarketStatus.ACTIVE if raw_status else MarketStatus.CLOSED
+        is_active = data.get("active", True) and not data.get("closed", False)
+        status = MarketStatus.ACTIVE if is_active else MarketStatus.CLOSED
+
+        # conditionId (Gamma) or condition_id (CLOB)
+        condition_id = data.get("conditionId", data.get("condition_id", ""))
 
         return Market(
-            condition_id=data.get("condition_id", ""),
+            condition_id=condition_id,
             question=data.get("question", ""),
             description=data.get("description", ""),
             status=status,

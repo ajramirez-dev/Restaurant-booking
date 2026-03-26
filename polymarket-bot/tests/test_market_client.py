@@ -21,19 +21,21 @@ from src.models import Market, MarketStatus, OrderBook, MarketPrice
 # ---------------------------------------------------------------------------
 
 SAMPLE_GAMMA_MARKET = {
-    "condition_id": "0xabc123",
+    # Real Gamma API field names (camelCase)
+    "conditionId": "0xabc123",
     "question": "Will Bitcoin reach $100k by end of 2025?",
     "description": "This market resolves YES if BTC/USD closes above 100000.",
     "active": True,
+    "closed": False,
     "category": "crypto",
-    "end_date_iso": "2025-12-31T23:59:59Z",
+    "endDate": "2025-12-31T23:59:59Z",
     "volume24hr": "150000.50",
     "volume": "2500000.00",
     "liquidity": "85000.00",
-    "tokens": [
-        {"token_id": "token_yes_001", "outcome": "YES", "price": "0.67", "winner": False},
-        {"token_id": "token_no_001",  "outcome": "NO",  "price": "0.33", "winner": False},
-    ],
+    # Token IDs and prices as parallel arrays (actual Gamma API shape)
+    "clobTokenIds": ["token_yes_001", "token_no_001"],
+    "outcomes": ["YES", "NO"],
+    "outcomePrices": ["0.67", "0.33"],
 }
 
 SAMPLE_ORDERBOOK = {
@@ -247,8 +249,14 @@ def test_market_yes_no_price_accessors() -> None:
     assert market.no_price == Decimal("0.33")
 
 
-def test_market_closed_status() -> None:
+def test_market_closed_via_active_false() -> None:
     data = {**SAMPLE_GAMMA_MARKET, "active": False}
+    market = PolymarketClient._parse_gamma_market(data)
+    assert market.status == MarketStatus.CLOSED
+
+
+def test_market_closed_via_closed_flag() -> None:
+    data = {**SAMPLE_GAMMA_MARKET, "active": True, "closed": True}
     market = PolymarketClient._parse_gamma_market(data)
     assert market.status == MarketStatus.CLOSED
 

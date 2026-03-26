@@ -29,6 +29,11 @@ class Config:
             "GAMMA_API_BASE_URL", "https://gamma-api.polymarket.com"
         )
     )
+    data_api_base_url: str = field(
+        default_factory=lambda: os.getenv(
+            "DATA_API_BASE_URL", "https://data-api.polymarket.com"
+        )
+    )
 
     # Auth (optional — only for order placement, not needed for reads)
     private_key: str | None = field(
